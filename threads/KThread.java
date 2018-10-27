@@ -37,7 +37,7 @@ public class KThread {
 	Lib.assertTrue(currentThread != null);
 	return currentThread;
     }
-    
+
     /**
      * Allocate a new <tt>KThread</tt>. If this is the first <tt>KThread</tt>,
      * create an idle thread as well.
@@ -77,7 +77,7 @@ public class KThread {
      */
     public KThread setTarget(Runnable target) {
 	Lib.assertTrue(status == statusNew);
-	
+
 	this.target = target;
 	return this;
     }
@@ -138,20 +138,20 @@ public class KThread {
     public void fork() {
 	Lib.assertTrue(status == statusNew);
 	Lib.assertTrue(target != null);
-	
+
 	Lib.debug(dbgThread,
-		  "Forking thread: " + toString() + " Runnable: " + target);
+		"Forking thread: " + toString() + " Runnable: " + target);
 
 	boolean intStatus = Machine.interrupt().disable();
 
 	tcb.start(new Runnable() {
-		public void run() {
-		    runThread();
-		}
-	    });
+	    public void run() {
+		runThread();
+	    }
+	});
 
 	ready();
-	
+
 	Machine.interrupt().restore(intStatus);
     }
 
@@ -163,7 +163,7 @@ public class KThread {
 
     private void begin() {
 	Lib.debug(dbgThread, "Beginning thread: " + toString());
-	
+
 	Lib.assertTrue(this == currentThread);
 
 	restoreState();
@@ -183,7 +183,7 @@ public class KThread {
      */
     public static void finish() {
 	Lib.debug(dbgThread, "Finishing thread: " + currentThread.toString());
-	
+
 	Machine.interrupt().disable();
 
 	Machine.autoGrader().finishingCurrentThread();
@@ -193,7 +193,7 @@ public class KThread {
 
 
 	currentThread.status = statusFinished;
-	
+
 	sleep();
     }
 
@@ -215,15 +215,15 @@ public class KThread {
      */
     public static void yield() {
 	Lib.debug(dbgThread, "Yielding thread: " + currentThread.toString());
-	
+
 	Lib.assertTrue(currentThread.status == statusRunning);
-	
+
 	boolean intStatus = Machine.interrupt().disable();
 
 	currentThread.ready();
 
 	runNextThread();
-	
+
 	Machine.interrupt().restore(intStatus);
     }
 
@@ -240,7 +240,7 @@ public class KThread {
      */
     public static void sleep() {
 	Lib.debug(dbgThread, "Sleeping thread: " + currentThread.toString());
-	
+
 	Lib.assertTrue(Machine.interrupt().disabled());
 
 	if (currentThread.status != statusFinished)
@@ -255,14 +255,14 @@ public class KThread {
      */
     public void ready() {
 	Lib.debug(dbgThread, "Ready thread: " + toString());
-	
+
 	Lib.assertTrue(Machine.interrupt().disabled());
 	Lib.assertTrue(status != statusReady);
-	
+
 	status = statusReady;
 	if (this != idleThread)
 	    readyQueue.waitForAccess(this);
-	
+
 	Machine.autoGrader().readyThread(this);
     }
 
@@ -274,26 +274,31 @@ public class KThread {
      */
     public void join() {    // NEW joinQueue to store ready threads
 	Lib.debug(dbgThread, "Joining to thread: " + toString());
+
 	Lib.assertTrue(this != currentThread);
-	  // set flag to disable critical section for other threads
+	// set flag to disable critical section for other threads
+
 	boolean intStatus = Machine.interrupt().disable();
-	// initialize joinQueue -> true = transferPriority
-	joinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
-	// put joined thread on joinQueue
-	joinQueue.acquire(this);
-	
+
+	if(joinQueue ==  null) {
+	    // initialize joinQueue -> true = transferPriority
+	    joinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
+	    // put joined thread on joinQueue
+	    joinQueue.acquire(this);
+	}
+
 	if(this != currentThread && status != statusFinished) { // valid join
-	  // enter critical section
-	  // add thread to joinQueue
-	  joinQueue.waitForAccess(currentThread);
-	  // put thread to sleep if successful
-	  currentThread.sleep();
-    }
+	    // enter critical section
+	    // add thread to joinQueue
+	    joinQueue.waitForAccess(currentThread);
+	    // put thread to sleep if successful
+	    currentThread.sleep();
+	}
 	// give up lock, return state
 	Machine.interrupt().restore(intStatus);
-	
+
     }
-    
+
     /**
      * Create the idle thread. Whenever there are no threads ready to be run,
      * and <tt>runNextThread()</tt> is called, it will run the idle thread. The
@@ -305,17 +310,17 @@ public class KThread {
      */
     private static void createIdleThread() {
 	Lib.assertTrue(idleThread == null);
-	
+
 	idleThread = new KThread(new Runnable() {
 	    public void run() { while (true) yield(); }
 	});
 	idleThread.setName("idle");
 
 	Machine.autoGrader().setIdleThread(idleThread);
-	
+
 	idleThread.fork();
     }
-    
+
     /**
      * Determine the next thread to run, then dispatch the CPU to the thread
      * using <tt>run()</tt>.
@@ -356,7 +361,7 @@ public class KThread {
 	currentThread.saveState();
 
 	Lib.debug(dbgThread, "Switching from: " + currentThread.toString()
-		  + " to: " + toString());
+	+ " to: " + toString());
 
 	currentThread = this;
 
@@ -371,13 +376,13 @@ public class KThread {
      */
     protected void restoreState() {
 	Lib.debug(dbgThread, "Running thread: " + currentThread.toString());
-	
+
 	Lib.assertTrue(Machine.interrupt().disabled());
 	Lib.assertTrue(this == currentThread);
 	Lib.assertTrue(tcb == TCB.currentTCB());
 
 	Machine.autoGrader().runningThread(this);
-	
+
 	status = statusRunning;
 
 	if (toBeDestroyed != null) {
@@ -400,11 +405,11 @@ public class KThread {
 	PingTest(int which) {
 	    this.which = which;
 	}
-	
+
 	public void run() {
 	    for (int i=0; i<5; i++) {
 		System.out.println("*** thread " + which + " looped "
-				   + i + " times");
+			+ i + " times");
 		currentThread.yield();
 	    }
 	}
@@ -417,7 +422,7 @@ public class KThread {
      */
     public static void selfTest() {
 	Lib.debug(dbgThread, "Enter KThread.selfTest");
-	
+
 	new KThread(new PingTest(1)).setName("forked thread").fork();
 	new PingTest(0).run();
     }
@@ -446,10 +451,10 @@ public class KThread {
     private String name = "(unnamed thread)";
     private Runnable target;
     private TCB tcb;
-    
+
     //NEW queue to store valid threads for join()
     private ThreadQueue joinQueue = null;
-    
+
     /**
      * Unique identifer for this thread. Used to deterministically compare
      * threads.
