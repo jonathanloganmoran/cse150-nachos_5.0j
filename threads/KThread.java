@@ -186,6 +186,20 @@ public class KThread {
 
 	Machine.interrupt().disable();
 
+	// NEW condition for Task 1: `join()`
+	// Init temp queue to execute joinQueue threads
+	ThreadQueue thisJoinQueue = currentThread.joinQueue;
+
+	// check if threads exist
+	if(thisJoinQueue != null) {
+	    // pull thread off queue
+	    KThread thread = thisJoinQueue.nextThread();
+	    while(thread != null) {
+		thread.ready();				// flag for ready queue
+		thread = thisJoinQueue.nextThread();	// get next thread
+	    }
+	}
+
 	Machine.autoGrader().finishingCurrentThread();
 
 	Lib.assertTrue(toBeDestroyed == null);
@@ -367,14 +381,6 @@ public class KThread {
 
 	tcb.contextSwitch();
 
-	// pull thread from joinQueue and restore
-	if(joinQueue != null) {
-	    KThread thread = joinQueue.nextThread();
-	    while(thread != null) {
-	        thread.ready();
-		thread = joinQueue.nextThread();
-	    }
-        }
 	// run thread with appropriate restore flag
 	currentThread.restoreState();
     }
