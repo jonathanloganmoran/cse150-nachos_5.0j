@@ -367,6 +367,15 @@ public class KThread {
 
 	tcb.contextSwitch();
 
+	// pull thread from joinQueue and restore
+	if(joinQueue != null) {
+	    KThread thread = joinQueue.nextThread();
+	    while(thread != null) {
+	        thread.ready();
+		thread = joinQueue.nextThread();
+	    }
+        }
+	// run thread with appropriate restore flag
 	currentThread.restoreState();
     }
 
