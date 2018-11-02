@@ -1,6 +1,9 @@
 package nachos.threads;
 
+import java.util.LinkedList;
+
 import nachos.machine.*;
+import nachos.threads.Lock;		// NEW waitLock - P1 T1.3
 
 /**
  * Uses the hardware timer to provide preemption, and to allow threads to sleep
@@ -18,6 +21,13 @@ public class Alarm {
 	Machine.timer().setInterruptHandler(new Runnable() {
 		public void run() { timerInterrupt(); }
 	    });
+	
+	// NEW for T1.3: Alarm class
+	waitLock = new Lock();				// init lock for waitUntil()
+	this.waitingQueue = new LinkedList<KThread>();	// init queue for waiting threads
+	
+	
+	
     }
 
     /**
@@ -27,7 +37,24 @@ public class Alarm {
      * that should be run.
      */
     public void timerInterrupt() {
-	KThread.currentThread().yield();
+	// NEW T1.3: check if threads are due on waitingQueue
+	
+	// NEW T1.3: disable interrupts to place on ready()
+	waitLock.acquire();				// grab lock for each thread
+	
+	// NEW T1.3: check if threads are due on waitingQueue
+	if(!waitingQueue.isEmpty()) {
+	    for(KThread it : waitingQueue) {		// "look" through queue
+		// check dueTime against dynamic CPU clock time and init case == -1
+		if(it.getDueTime() <= Machine.timer().getTime() && it.getDueTime() > -1) {
+		    it.ready();				// flag for readyQueue
+		    waitingQueue.remove(it);		// remove from waitingQueue
+		} 					// else proceed
+	    }						// till all threads are checked
+	} 						// else no waiting threads at currentTime
+	
+	// NEW T1.3: check if threads are due on waitingQueue
+	waitLock.release();
     }
 
     /**
@@ -45,9 +72,25 @@ public class Alarm {
      * @see	nachos.machine.Timer#getTime()
      */
     public void waitUntil(long x) {
-	// for now, cheat just to get something working (busy waiting is bad)
-	long wakeTime = Machine.timer().getTime() + x;
-	while (wakeTime > Machine.timer().getTime())
-	    KThread.yield();
+	// acquire lock to put threads to sleep
+	waitLock.acquire();
+	
+	long dueTime = (Machine.timer().getTime() + x);
+	
+	// NEW T1.3: update thread's due time -- NEED Get()/Set() methods
+	KThread.currentThread().setDueTime(dueTime);
+	
+	// NEW for Task 1.3: put thread onto waitingQueue
+	if(dueTime >= Machine.timer().getTime()) {	// handle due threads
+	    waitingQueue.add(KThread.currentThread());
+	    KThread.sleep();
+	}
+	// no more due threads, end of critical section
+	waitLock.release();
+
     }
+    // NEW Task 1.3: Alarm Class
+    private Lock waitLock;				// acquire lock in waitUntil()
+    private LinkedList<KThread> waitingQueue;		// hold waitUntil() threads
+
 }

@@ -43,6 +43,7 @@ public class KThread {
      * create an idle thread as well.
      */
     public KThread() {
+	setDueTime(-1);			// init time to wake()
 	if (currentThread != null) {
 	    tcb = new TCB();
 	}	    
@@ -80,6 +81,22 @@ public class KThread {
 
 	this.target = target;
 	return this;
+    }
+
+    /**
+     * NEW T1.3: return thread's expected wake time
+     * @return the dueTime
+     */
+    public long getDueTime() {
+	return dueTime;
+    }
+
+    /**
+     * NEW T1.3: handler to set thread `dueTime` before adding to `waitingQueue`
+     * @param handler to update the thread's dueTime
+     */
+    public void setDueTime(long dueTime) {
+	this.dueTime = dueTime;
     }
 
     /**
@@ -186,6 +203,16 @@ public class KThread {
 
 	Machine.interrupt().disable();
 
+	// NEW condition for Task 1: `join()`
+	
+	if(currentThread.joinQueue != null) {				// check if threads exist
+	    KThread thread = currentThread.joinQueue.nextThread(); 	// pull thread off queue
+	    while(thread != null) {
+		thread.ready();						// flag for ready queue
+		thread = currentThread.joinQueue.nextThread();		// get next thread
+	    }
+	}
+
 	Machine.autoGrader().finishingCurrentThread();
 
 	Lib.assertTrue(toBeDestroyed == null);
@@ -280,7 +307,7 @@ public class KThread {
 
 	boolean intStatus = Machine.interrupt().disable();
 
-	if(joinQueue ==  null) {
+	if(joinQueue == null) {
 	    // initialize joinQueue -> true = transferPriority
 	    joinQueue = ThreadedKernel.scheduler.newThreadQueue(true);
 	    // put joined thread on joinQueue
@@ -292,7 +319,7 @@ public class KThread {
 	    // add thread to joinQueue
 	    joinQueue.waitForAccess(currentThread);
 	    // put thread to sleep if successful
-	    currentThread.sleep();
+	    KThread.sleep();
 	}
 	// give up lock, return state
 	Machine.interrupt().restore(intStatus);
@@ -367,14 +394,6 @@ public class KThread {
 
 	tcb.contextSwitch();
 
-	// pull thread from joinQueue and restore
-	if(joinQueue != null) {
-	    KThread thread = joinQueue.nextThread();
-	    while(thread != null) {
-	        thread.ready();
-		thread = joinQueue.nextThread();
-	    }
-        }
 	// run thread with appropriate restore flag
 	currentThread.restoreState();
     }
@@ -419,7 +438,7 @@ public class KThread {
 	    for (int i=0; i<5; i++) {
 		System.out.println("*** thread " + which + " looped "
 			+ i + " times");
-		currentThread.yield();
+		KThread.yield();
 	    }
 	}
 
@@ -460,6 +479,9 @@ public class KThread {
     private String name = "(unnamed thread)";
     private Runnable target;
     private TCB tcb;
+    
+    //NEW T1.3: due time variable
+    private long dueTime;
 
     //NEW queue to store valid threads for join()
     private ThreadQueue joinQueue = null;
