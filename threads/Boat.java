@@ -4,7 +4,14 @@ import nachos.ag.BoatGrader;
 public class Boat
 {
     static BoatGrader bg;
-    
+    static int adultsOahu;
+    static int adultsMolokai;
+    static int childrenOahu;
+    static int childrenMolokai;
+    static boolean childPilot;
+    static boolean adultPilot;
+    static boolean pilot;
+    static boolean boatInOahu;
     public static void selfTest()
     {
 	BoatGrader b = new BoatGrader();
@@ -24,22 +31,51 @@ public class Boat
 	// Store the externally generated autograder in a class
 	// variable to be accessible by children.
 	bg = b;
-
+    childPilot = false;
+    adultPilot = false;
+    pilot = false;
+    adultsOahu = 0;
+    childrenOahu = 0;
+    adultsMolokai = 0;
+    childrenMolokai = 0;
 	// Instantiate global variables here
 	
 	// Create threads here. See section 3.4 of the Nachos for Java
 	// Walkthrough linked from the projects page.
-
-	Runnable r = new Runnable() {
-	    public void run() {
-                SampleItinerary();
+    while(adults > 0){
+        Runnable adult = new Runnable() {
+            public void run() {
+                AdultItinerary();
             }
         };
-        KThread t = new KThread(r);
-        t.setName("Sample Boat Thread");
+        KThread t = new KThread(adult);
+        t.setName("An Adult Itinerary");
         t.fork();
-
+        adultsOahu++;
     }
+    while(children > 0){
+        Runnable adult = new Runnable() {
+            public void run() {
+                AdultItinerary();
+            }
+        };
+        KThread t = new KThread(adult);
+        t.setName("An Adult Itinerary");
+        t.fork();
+        childrenOahu++;
+    }
+
+  }//endbegin
+//	Runnable r = new Runnable() {
+//	    public void run() {
+//                SampleItinerary();
+//            }
+//        };
+//        KThread t = new KThread(r);
+//        t.setName("Sample Boat Thread");
+//        t.fork();
+//
+//    }
 
     static void AdultItinerary()
     {
@@ -49,10 +85,21 @@ public class Boat
 	       bg.AdultRowToMolokai();
 	   indicates that an adult has rowed the boat across to Molokai
 	*/
+
+
+
+
     }
 
     static void ChildItinerary()
     {
+        //If theres 2 or more children in Oahu, we can send 2 of them to Molokai
+        if(childrenOahu >= 2 && boatInOahu){
+            pilot = true;
+            childPilot = true;
+        }else if (childrenOahu <= 1){
+            //thres 1 or less child on Oahu
+        }
     }
 
     static void SampleItinerary()

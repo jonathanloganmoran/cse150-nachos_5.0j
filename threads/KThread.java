@@ -209,10 +209,9 @@ public class KThread {
 	    KThread thread = currentThread.joinQueue.nextThread(); 	// pull thread off queue
 	    while(thread != null) {
 		thread.ready();						// flag for ready queue
-		thread = currentThread.joinQueue.nextThread();		// get next thread
+		thread = currentThread.joinQueue.nextThread();
 	    }
 	}
-
 	Machine.autoGrader().finishingCurrentThread();
 
 	Lib.assertTrue(toBeDestroyed == null);

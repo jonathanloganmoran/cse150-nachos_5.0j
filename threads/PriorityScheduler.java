@@ -142,8 +142,14 @@ public class PriorityScheduler extends Scheduler {
 
 	public KThread nextThread() {
 	    Lib.assertTrue(Machine.interrupt().disabled());
-	    // implement me
-	    return null;
+	    // implement me -- Task 1.5: @amunoz35 11/3
+	    ThreadState check = pickNextThread(); // define a new threaded state
+
+	    if(check != null) {			  // has to only run when the threaded state isn't empty
+		check.acquire(this);
+		return check.thread;		  // will return the thread
+	    }
+	    return null;			  // if not, returns nothing otherwise
 	}
 
 	/**
