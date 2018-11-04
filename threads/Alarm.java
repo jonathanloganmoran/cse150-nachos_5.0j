@@ -83,7 +83,6 @@ public class Alarm {
 	KThread.currentThread().setDueTime(dueTime);
 	
 	// NEW for Task 1.3: put thread onto waitingQueue
-	
 	waitingQueue.add(KThread.currentThread());
 	waitLock.acquire();
 	KThread.sleep();

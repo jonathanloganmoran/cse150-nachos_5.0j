@@ -18,8 +18,8 @@ public class Communicator {
 	private int speakerCount, listenerCount;	// Records number of speakers, listeners
 	private Condition2 listener;
 	private Condition2 speaker;
-	private boolean wordReady;					// Records if a speaker has spoken yet
-	//private int listenWord;
+	private boolean wordReady;			// Records if a speaker has spoken yet
+							// private int listenWord;
 	
 	public Communicator() {
 		noise = 0;
