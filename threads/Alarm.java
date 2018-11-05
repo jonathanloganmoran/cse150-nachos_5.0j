@@ -24,9 +24,32 @@ public class Alarm {
 		public void run() { timerInterrupt(); }
 	    });
 	
-	// NEW for T1.3: Alarm class
-	waitLock = new Lock();				// init lock for waitUntil()
-	waitingQueue = new LinkedList<KThread>();	// init queue for waiting threads
+	// NEW for T1.3: private class AlarmThread to sort in queue - @jonathanloganmoran 11/4
+	private class AlarmThread implements Comparable<AlarmThread> {
+	    public AlarmThread(KThread thread, long sleepUntil) {
+		this.thread = thread;
+		this.sleepUntil = sleepUntil;		// sort in ascending (FIFO)
+	    }
+	    // NEW for T1.3: extends Comparable to sort threads by dueTime (FIFO)
+	    public int compareTo(AlarmThread alarmThread) {
+		if(this.sleepUntil > alarmThread.sleepUntil) {
+		    return 1; 				// due before -> put front
+		}
+		else if(this.sleepUntil < alarmThread.sleepUntil) {
+		    return -1;				// due after -> push back
+		}
+		else {
+		    return 0;				// not due
+		}
+	    }
+	    
+	    //NEW for T1.3: move instance variables - @jonathanmoran 11/4
+	    private KThread thread;			// waitingQueue thread
+	    private long sleepUntil;			// thread dueTime ref
+	}
+	// NEW for T1.3: Remove lock instance -> disable machine interrupts (Issue #3)
+	//waitLock = new Lock();				// init lock for waitUntil()
+	waitingQueue = new LinkedList<AlarmThread>();	// init queue for waiting threads
 	
 	
 	
@@ -41,11 +64,14 @@ public class Alarm {
     public void timerInterrupt() {
 	// NEW T1.3: check if threads are due on waitingQueue
 	
-	// NEW T1.3: disable interrupts to place on ready()
-	waitLock.acquire();				// grab lock for each thread
+	/* NEW T1.3: disable interrupts to place on ready()
+	/*waitLock.acquire();				// grab lock for each thread
+	 */
+	boolean intStatus = Machine.interrupt().disable();
+	
 	// NEW T1.3: check if threads are due on waitingQueue
 	while(!waitingQueue.isEmpty()) {
-	    for(KThread it : waitingQueue) {		// "look" through queue
+	    for(AlarmThread it : waitingQueue) {		// "look" through LinkedList
 		// check dueTime against this CPU clock time and init case == -1
 		if(it.getDueTime() <= Machine.timer().getTime() && it.getDueTime() > -1) {
 		    it.ready();				// flag for readyQueue
@@ -92,6 +118,6 @@ public class Alarm {
     
     // NEW Task 1.3: Alarm Class
     private Lock waitLock;				// acquire lock in waitUntil()
-    private LinkedList<KThread> waitingQueue;		// hold waitUntil() threads
+    private LinkedList<AlarmThread> waitingQueue;	// hold waitUntil() threads
 
 }

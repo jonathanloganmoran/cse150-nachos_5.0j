@@ -5,6 +5,8 @@ import nachos.machine.*;
 import java.util.TreeSet;
 import java.util.HashSet;
 import java.util.Iterator;
+// NEW T1.5: LinkedList for PriorityQueue
+import java.util.LinkedList;
 
 /**
  * A scheduler that chooses threads based on their priorities.
@@ -126,12 +128,15 @@ public class PriorityScheduler extends Scheduler {
      * A <tt>ThreadQueue</tt> that sorts threads by priority.
      */
     protected class PriorityQueue extends ThreadQueue {
+	// NEW T1.5: waitingQueue to store thread state
 	PriorityQueue(boolean transferPriority) {
-	    this.transferPriority = transferPriority;
+	    this.transferPriority = transferPriority;    
+	    this.waitingQueue = new LinkedList<ThreadState>();	// using ThreadState KThread pointer
 	}
-
+	// NEW T1.5: add to waitingQueue
 	public void waitForAccess(KThread thread) {
 	    Lib.assertTrue(Machine.interrupt().disabled());
+	    this.waitingQueue.add(getThreadState(thread));	// add thread to queue
 	    getThreadState(thread).waitForAccess(this);
 	}
 
@@ -143,14 +148,14 @@ public class PriorityScheduler extends Scheduler {
 	public KThread nextThread() {
 	    Lib.assertTrue(Machine.interrupt().disabled());
 	    // implement me -- Task 1.5: @amunoz35 11/3
-	    
-	    ThreadState check = pickNextThread(); // define a new threaded state
 
-	    if(check != null) {			  // has to only run when the threaded state isn't empty
-		check.acquire(this);
-		return check.thread;		  // will return the thread
+	    // NEW T1.5: clean up nextThread - @jonathanloganmoran 11/4
+	    ThreadState check = this.pickNextThread(); 	// get this thread's state
+	    if(check != null) {				// if thread state needs handling
+		this.acquire(this);
+		return check.thread;		  	// will return the thread
 	    }
-	    return null;			  // if not, returns nothing otherwise
+	    return null;			  	// if not, returns nothing otherwise
 	}
 
 	/**
@@ -161,8 +166,21 @@ public class PriorityScheduler extends Scheduler {
 	 *		return.
 	 */
 	protected ThreadState pickNextThread() {
-	    // implement me
-	    return null;
+	    // implement me - @jonathanloganmoran 11/4
+	    ThreadState nextThread = null;		// pointer to next in line
+	    
+	    // NEW T1.5: find thread that has waited the longest
+	    for(ThreadState wQ : this.waitingQueue) {
+		int thisPriority = getThreadState(thread).getEffectivePriority();
+		if(nextThread == null) {	// case 1: init nextThread pointer
+		    nextThread = thread;	// next on PriorityQueue
+		}
+		// NEW T1.5: handle changes to priority after nextThread is check
+		else if(priority > getThreadState(nextThread).getEffectivePriority()) {
+		    nextThread = thread;
+		}
+	    }
+	    return nextThread;
 	}
 	
 	public void print() {
@@ -175,6 +193,14 @@ public class PriorityScheduler extends Scheduler {
 	 * threads to the owning thread.
 	 */
 	public boolean transferPriority;
+	
+	// NEW T1.5: added waiting threads PriorityQueue
+	protected LinkedList<ThreadState> waitingQueue;
+	
+	// NEW T1.5: thread waiting for priority
+	protected ThreadState waitingThread = null;
+	
+	
     }
 
     /**
@@ -184,6 +210,8 @@ public class PriorityScheduler extends Scheduler {
      *
      * @see	nachos.threads.KThread#schedulingState
      */
+    
+    // NEW T1.5: cached effectivePriority implementation - @jonathanloganmoran
     protected class ThreadState {
 	/**
 	 * Allocate a new <tt>ThreadState</tt> object and associate it with the
@@ -193,6 +221,9 @@ public class PriorityScheduler extends Scheduler {
 	 */
 	public ThreadState(KThread thread) {
 	    this.thread = thread;
+	    // NEW T1.5: thread holds lists to queued resources
+	    this.runningQueue = new SynchList();
+	    this.waitingQueue = new SynchList();
 	    
 	    setPriority(priorityDefault);
 	}
@@ -212,7 +243,13 @@ public class PriorityScheduler extends Scheduler {
 	 * @return	the effective priority of the associated thread.
 	 */
 	public int getEffectivePriority() {
-	    // implement me
+	    // implement me - 11/4 @jonathanloganmoran
+	    // check if any runningThreads have cached priorities
+	    //   if none are cached, request priority
+	    //   else if check if priorityFlag is true
+	    //     update priority for all threads in runningQueue list
+	    //     set priorityFlag = false;
+	    //   else return cached priority
 	    return priority;
 	}
 
@@ -227,7 +264,8 @@ public class PriorityScheduler extends Scheduler {
 	    
 	    this.priority = priority;
 	    
-	    // implement me
+	    // implement me - 11/4 @jonathanloganmoran
+	    // reset all cached priorities in waitingQueue
 	}
 
 	/**
@@ -243,7 +281,10 @@ public class PriorityScheduler extends Scheduler {
 	 * @see	nachos.threads.ThreadQueue#waitForAccess
 	 */
 	public void waitForAccess(PriorityQueue waitQueue) {
-	    // implement me
+	    // implement me - 11/4 @jonathanloganmoran
+	    // add to thread's runningQueue
+	    // remove from thread's waitingQueue
+	    // call update to cached priority
 	}
 
 	/**
@@ -257,12 +298,32 @@ public class PriorityScheduler extends Scheduler {
 	 * @see	nachos.threads.ThreadQueue#nextThread
 	 */
 	public void acquire(PriorityQueue waitQueue) {
-	    // implement me
+	    // implement me - 11/4 @jonathanloganmoran
+	    // add to thread's waitingQueue
+	    // remove from threads runningQueue
+	    
+	}
+	// NEW T1.5: thread will release waitLock
+	public void release(PriorityQueue waitQueue) {
+	    // remove waitQueue from this thread's allocated resources
+	    // call update to cached priority value
 	}	
 
 	/** The thread with which this object is associated. */	   
 	protected KThread thread;
 	/** The priority of the associated thread. */
 	protected int priority;
+	
+	// NEW T1.5: cache thread's priority
+	protected int effectivePriority = priorityMinimum;
+	
+	// NEW T1.5: handle priority updates when ThreadState changes
+	protected boolean priorityFlag = false;
+	
+	// NEW T1.5: thread's allocated resources
+	protected SynchList runningQueue;
+	protected SynchList waitingQueue;
+	
+	// NEW T1.5: thread's 
     }
 }
