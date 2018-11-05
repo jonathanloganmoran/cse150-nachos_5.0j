@@ -1,7 +1,5 @@
 package nachos.threads;
 
-package nachos.threads;
-
 import nachos.machine.*;
 
 /**

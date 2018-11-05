@@ -2,9 +2,12 @@ package nachos.threads;
 
 import nachos.machine.*;
 
-import java.util.TreeSet;
-import java.util.HashSet;
-import java.util.Iterator;
+/* unused PriorityScheduler imports
+ * import java.util.TreeSet;
+ * import java.util.HashSet;
+ * import java.util.Iterator;
+ */
+
 // NEW T1.5: LinkedList for PriorityQueue
 import java.util.LinkedList;
 
@@ -150,12 +153,12 @@ public class PriorityScheduler extends Scheduler {
 	    // implement me -- Task 1.5: @amunoz35 11/3
 
 	    // NEW T1.5: clean up nextThread - @jonathanloganmoran 11/4
-	    ThreadState check = this.pickNextThread(); 	// get this thread's state
-	    if(check != null) {				// if thread state needs handling
-		this.acquire(this);
-		return check.thread;		  	// will return the thread
+	    ThreadState check = this.pickNextThread(); 		// get this thread's state
+	    if(check != null) {					// if thread state needs handling
+		check.acquire(this);
+		return check.thread;		  		// will return the thread
 	    }
-	    return null;			  	// if not, returns nothing otherwise
+	    return null;			  		// if not, returns nothing otherwise
 	}
 
 	/**
@@ -167,17 +170,17 @@ public class PriorityScheduler extends Scheduler {
 	 */
 	protected ThreadState pickNextThread() {
 	    // implement me - @jonathanloganmoran 11/4
-	    ThreadState nextThread = null;		// pointer to next in line
+	    ThreadState nextThread = null;			// pointer to next in line
 	    
 	    // NEW T1.5: find thread that has waited the longest
 	    for(ThreadState wQ : this.waitingQueue) {
-		int thisPriority = getThreadState(thread).getEffectivePriority();
-		if(nextThread == null) {	// case 1: init nextThread pointer
-		    nextThread = thread;	// next on PriorityQueue
+		int thisPriority = getThreadState(wQ.thread).getEffectivePriority();
+		if(nextThread == null) {			// case 1: init nextThread pointer
+		    nextThread = getThreadState(wQ.thread);	// next on PriorityQueue
 		}
 		// NEW T1.5: handle changes to priority after nextThread is check
-		else if(priority > getThreadState(nextThread).getEffectivePriority()) {
-		    nextThread = thread;
+		else if(thisPriority > getThreadState(wQ.thread).getEffectivePriority()) {
+		    nextThread = getThreadState(wQ.thread);
 		}
 	    }
 	    return nextThread;
