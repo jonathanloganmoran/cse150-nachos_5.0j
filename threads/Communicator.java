@@ -15,7 +15,7 @@ public class Communicator {
      */
     // NEW T1.4: 11/5 - @markmcc2950
     private Lock waitLock;					// Lock shared by the speaker and listener
-    private static Integer noise;				// Used to record what's spoken by speakers for listeners
+    private int noise;						// Used to record what's spoken by speakers for listeners
     private int speakerCount;					// Records number of speakers
     private int listenerCount;					// Records number of listeners
     private Condition2 listener;				// For the listener lock in public Communicator()
@@ -41,23 +41,24 @@ public class Communicator {
      *
      * @param    word    the integer to transfer.
      */
+    // NEW T1.4: Modified 11/5 - @jonathanloganmoran and @markmcc2950
     public void speak(int word) {
 	if(!waitLock.isHeldByCurrentThread()) {
 	    waitLock.acquire();					// Acquire the lock for the speaker
 	}
-	setSpeakerCount(getSpeakerCount() + 1);			// Increase the speaker count by 1
+//	setSpeakerCount(getSpeakerCount() + 1);			// Increase the speaker count by 1
 
 	/* While no listeners, or while a speaker has spoken a word not yet 'listened' to */
 	while(listenerCount == 0 || wordReady == true) {
+//	    listener.wake();
 	    speaker.sleep();
 	}
 
 	noise = word;						// Speaker 'speaks'
 	wordReady = true;					// Record that a word has been spoken
-	if(listenerCount == 0) {
-	    listener.wake();					// Wake listener, if none listening
-	}
-	setSpeakerCount(getSpeakerCount() - 1);			// Decrease speaker count by 1
+	listener.wake();					// Wake listener, if none listening
+	
+//	setSpeakerCount(getSpeakerCount() - 1);			// Decrease speaker count by 1
 	waitLock.release();					// Release the lock for the speaker
     }
 
@@ -76,14 +77,15 @@ public class Communicator {
 
 	/* While there is no word spoken yet, wake all speakers and put this listener to sleep */
 	while(wordReady == false) {
+	    speaker.wake();
 	    listener.sleep();					// Put listener to sleep
 	}
 
-	listenWord = noise.intValue();				// Listener hears what's spoken
+	listenWord = noise;				// Listener hears what's spoken
 	wordReady = false;					// Resets to show no word available to other listeners
 	setListenerCount(getListenerCount() - 1);		// Decrease number of active listeners by 1
 	
-	/* NEW T1.5: wake all speakers to check for listeners */
+	/* NEW T1.5: wake all speakers to check for listeners - @jonathanloganmoran */
 	speaker.wakeAll();
 	waitLock.release();					// Release the lock for the listener
 
