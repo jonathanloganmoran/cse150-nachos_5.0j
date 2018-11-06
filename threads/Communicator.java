@@ -13,6 +13,7 @@ public class Communicator {
     /**
      * Allocate a new communicator.
      */
+    // NEW T1.4: 11/5 - @markmcc2950
     private Lock waitLock;					// Lock shared by the speaker and listener
     private static Integer noise;				// Used to record what's spoken by speakers for listeners
     private int speakerCount;					// Records number of speakers
@@ -23,9 +24,9 @@ public class Communicator {
 
     public Communicator() {
 	noise = 0;						// Initialize noise to silent
-	waitLock = new Lock();					// Create lock for Communicator pair
-	this.speaker = new Condition2(waitLock);		// Speaker lock -> binary semaphore
-	this.listener = new Condition2(waitLock);		// Listener lock -> counting semaphore
+	waitLock = new Lock();					// Create lock
+	this.speaker = new Condition2(waitLock);		// Speaker lock	
+	this.listener = new Condition2(waitLock);		// Listener lock
 	setListenerCount(0);					// Initialize to zero listeners
 	setSpeakerCount(0);					// Initialize to zero speakers
 	wordReady = false;					// No words have been spoken
@@ -41,7 +42,7 @@ public class Communicator {
      * @param    word    the integer to transfer.
      */
     public void speak(int word) {
-	waitLock.acquire();											// Acquire the lock for the speaker
+	waitLock.acquire();					// Acquire the lock for the speaker
 	setSpeakerCount(getSpeakerCount() + 1);			// Increase the speaker count by 1
 
 	/* While no listeners, or while a speaker has spoken a word not yet 'listened' to */
@@ -49,11 +50,13 @@ public class Communicator {
 	    speaker.sleep();
 	}
 
-	noise = word;												// Speaker 'speaks'
-	wordReady = true;											// Record that a word has been spoken
-	listener.wakeAll();											// Wake all listeners
+	noise = word;						// Speaker 'speaks'
+	wordReady = true;					// Record that a word has been spoken
+	if(listenerCount == 0) {
+	    listener.wakeAll();					// Wake all listeners if none listening
+	}
 	setSpeakerCount(getSpeakerCount() - 1);			// Decrease speaker count by 1
-	waitLock.release();											// Release the lock for the speaker
+	waitLock.release();					// Release the lock for the speaker
     }
 
     /**
@@ -63,8 +66,8 @@ public class Communicator {
      * @return    the integer transferred.
      */
     public int listen() {
-	int listenWord;												// Variable to record the spoken word and save to this listener
-	waitLock.acquire();											// Acquire the lock for the listener
+	int listenWord;						// Variable to record the spoken word and save to this listener
+	waitLock.acquire();					// Acquire the lock for the listener
 	setListenerCount(getListenerCount() + 1);		// Increase the listener count by 1
 
 	/* While there is no word spoken yet, wake all speakers and put this listener to sleep */
@@ -74,9 +77,9 @@ public class Communicator {
 	}
 
 	listenWord = noise.intValue();				// Listener hears what's spoken
-	wordReady = false;											// Resets to show no word available to other listeners
+	wordReady = false;					// Resets to show no word available to other listeners
 	setListenerCount(getListenerCount() - 1);		// Decrease number of active listeners by 1
-	waitLock.release();											// Release the lock for the listener
+	waitLock.release();					// Release the lock for the listener
 
 	/* Return the recorded word */
 	return listenWord;
