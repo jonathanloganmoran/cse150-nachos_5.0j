@@ -1,5 +1,7 @@
 package nachos.userprog;
 
+import java.util.LinkedList;
+
 import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
@@ -14,12 +16,25 @@ public class UserKernel extends ThreadedKernel {
     public UserKernel() {
 	super();
     }
-
+    
     /**
      * Initialize this kernel. Creates a synchronized console and sets the
      * processor's exception handler.
      */
+    
+    // NEW P2: Create space for free page table
     public void initialize(String[] args) {
+	// Get the number of the machines physical pages
+	int numPhysPages = Machine.processor().getNumPhysPages();
+		
+	// Initialize the free page list and fill with Machine.numPhysPages number of pages
+	freePageList = new LinkedList<Integer>();
+	for(int i = 0; i < numPhysPages; i++) {
+		freePageList.add(i);
+	}
+	// Initialize the free page list lock
+	freePageListLock = new Lock();
+	
 	super.initialize(args);
 
 	console = new SynchConsole(Machine.console());
@@ -29,6 +44,44 @@ public class UserKernel extends ThreadedKernel {
 	    });
     }
 
+    /**
+    * Function returns an entry from the freePageList
+    * 
+    * @return free page in range from 0 to numPhysPages-1
+    * If no free pages, return -1
+    */
+    public static int getFreePage() {
+      	int freePageNumber = -1;
+        	
+    	// Attempt to acquire the lock in order to access the free page list
+      	freePageListLock.acquire();
+        	
+        // Get the number for a free page, if any
+        if(!freePageList.isEmpty()) {
+        	freePageNumber = freePageList.removeFirst();
+        }
+        
+        // Release the lock, waking up a process waiting to acquire this lock, if any
+        freePageListLock.release();
+        
+        return freePageNumber;
+    }
+        
+    /**
+     * This function returns an entry back to the freePageList
+     * 
+     */
+    public static void returnFreePage(int pageNumber) {
+       	//Attempt to acquire the lock in order to access the free page list
+       	freePageListLock.acquire();
+       	
+       	//Return the page to the free page list
+       	freePageList.add(pageNumber);
+       	
+       	//Release the lock, waking up a process waiting to acquire this lock, if any
+       	freePageListLock.release();
+    }
+    
     /**
      * Test the console device.
      */	
@@ -109,6 +162,10 @@ public class UserKernel extends ThreadedKernel {
 
     /** Globally accessible reference to the synchronized console. */
     public static SynchConsole console;
+    
+    // NEW P2: global free page list, protected by Lock
+    public static LinkedList<Integer> freePageList;
+    private static Lock freePageListLock;
 
     // dummy variables to make javac smarter
     private static Coff dummy1 = null;
