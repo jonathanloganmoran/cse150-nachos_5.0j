@@ -24,24 +24,23 @@ public class UserKernel extends ThreadedKernel {
     
     // NEW P2: Create space for free page table
     public void initialize(String[] args) {
-	// Get the number of the machines physical pages
-	int numPhysPages = Machine.processor().getNumPhysPages();
-		
-	// Initialize the free page list and fill with Machine.numPhysPages number of pages
-	freePageList = new LinkedList<Integer>();
-	for(int i = 0; i < numPhysPages; i++) {
-		freePageList.add(i);
-	}
-	// Initialize the free page list lock
-	freePageListLock = new Lock();
 	
 	super.initialize(args);
-
 	console = new SynchConsole(Machine.console());
 	
 	Machine.processor().setExceptionHandler(new Runnable() {
-		public void run() { exceptionHandler(); }
-	    });
+	    public void run() { exceptionHandler(); }
+	});
+	
+	// NEW T2.2: Get the number of the machines physical pages
+	int numPhysPages = Machine.processor().getNumPhysPages();
+	
+	// Initialize the free page list and fill with Machine.numPhysPages number of pages
+	// MOVE OUTSIDE METHOD: freePageList = new LinkedList<Integer>();
+	for(int i = 0; i < numPhysPages; i++) {
+		freePageList.add(i);
+	}
+			
     }
 
     /**
@@ -54,15 +53,15 @@ public class UserKernel extends ThreadedKernel {
       	int freePageNumber = -1;
         	
     	// Attempt to acquire the lock in order to access the free page list
-      	freePageListLock.acquire();
-        	
+      	Machine.interrupt().disable();
+        
         // Get the number for a free page, if any
         if(!freePageList.isEmpty()) {
         	freePageNumber = freePageList.removeFirst();
         }
         
         // Release the lock, waking up a process waiting to acquire this lock, if any
-        freePageListLock.release();
+        Machine.interrupt().enable();
         
         return freePageNumber;
     }
@@ -72,16 +71,30 @@ public class UserKernel extends ThreadedKernel {
      * 
      */
     public static void returnFreePage(int pageNumber) {
+	// Check for errors
+	Lib.assertTrue(pageNumber >= 0 && pageNumber < Machine.processor().getNumPhysPages());
+	
        	//Attempt to acquire the lock in order to access the free page list
-       	freePageListLock.acquire();
+       	Machine.interrupt().disable();
        	
        	//Return the page to the free page list
        	freePageList.add(pageNumber);
        	
        	//Release the lock, waking up a process waiting to acquire this lock, if any
-       	freePageListLock.release();
+       	Machine.interrupt().enable();
     }
     
+     /**
+      * This function returns the next available process id
+      * 
+      */
+    public static int getNextProcessId() {
+	int new_pid;
+	Machine.interrupt().disable();
+	new_pid = ++next_processid;
+	Machine.interrupt().enable();
+	return next_processid;
+    }
     /**
      * Test the console device.
      */	
@@ -164,9 +177,12 @@ public class UserKernel extends ThreadedKernel {
     public static SynchConsole console;
     
     // NEW P2: global free page list, protected by Lock
-    public static LinkedList<Integer> freePageList;
-    private static Lock freePageListLock;
+    private static LinkedList<Integer> freePageList = new LinkedList<Integer>();
+    // CHANGE TO Machine.interrupt() <-- private static Lock freePageListLock;
 
+    /** Store the next available process id to be assigned */
+    private static int next_processid;
+    
     // dummy variables to make javac smarter
     private static Coff dummy1 = null;
 }

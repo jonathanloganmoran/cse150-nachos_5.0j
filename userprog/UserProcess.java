@@ -23,6 +23,24 @@ public class UserProcess {
     /**
      * Allocate a new process.
      */
+    
+    //NEW T2.2: Support for fragmentation in physical memory (allocate child)
+    private int process_id;					// unique id of process
+    private UThread thread;					// user thread allocation
+    private int parent_pid;					// unique id of parent process
+    
+    // NEW T2.3: Support for multiprogramming
+    class childProcess {
+	private static final int START = -100;			// dummy var to init status
+	UserProcess child;					// allocate fragmented user process
+	
+	childProcess(UserProcess up) {
+	    this.child = up;
+	    this.status = START;				// init user process to START
+	    process_id = UserKernel.getFreePage();			// return next page id
+	}
+    }
+    
     public UserProcess() {
 	int numPhysPages = Machine.processor().getNumPhysPages();
 	pageTable = new TranslationEntry[numPhysPages];
@@ -53,7 +71,9 @@ public class UserProcess {
 	if (!load(name, args))
 	    return false;
 
-	new UThread(this).setName(name).fork();
+	// NEW T2.2: Initialize new UThread instance
+	thread = new UThread(this);
+	thread.setName(name).fork();
 
 	return true;
     }
@@ -135,27 +155,26 @@ public class UserProcess {
 
 	Lib.assertTrue(offset >= 0 && length >= 0 && offset+length <= data.length);
 
-	byte[] memory = Machine.processor().getMemory();				// returns reference to physical memory
+	byte[] memory = Machine.processor().getMemory();			// returns reference to physical memory
 
 	// NEW T2.2: Handle the virtual-to-physical page address translation
-	int vpn = Processor.pageFromAddress(vaddr);					// store the pte of the curr byte: (vaddr - bytesRead)/pageSize
-	
-	int voffset = Processor.offsetFromAddress(vaddr);				// store offset of user process: (vaddr + bytesRead)%pageSize
+	int vpn = Processor.pageFromAddress(vaddr);				// store the pte of the curr byte: (vaddr - bytesRead)/pageSize
+	int voffset = Processor.offsetFromAddress(vaddr);			// store offset of user process: (vaddr + bytesRead)%pageSize
 
-	if(vpn < 0 || vpn >= memory.length) {						// check if valid
+	if(vpn < 0 || vpn >= memory.length) {					// check if valid
 	    return 0;
 	}
 
-	if(vpn >= numPages) {								// invalid size (non-contiguous)
+	if(vpn >= numPages) {							// invalid size (non-contiguous)
 	    System.out.print("Invalid page entry: " + vpn);
-	    return -1;									// CC 2.1: DO NOT DESTROY CURR PROCESS
+	    return -1;								// CC 2.1: DO NOT DESTROY CURR PROCESS
 	}
 	
 	// NEW T2.2: Create new virtual-to-physical page translation instance
 	TranslationEntry newPage = pageTable[vpn];   
 
 	if (!pageTable[vpn].valid) { return -1; }				// CC 2.1: ignore invalid entries
-	if(newPage.readOnly) { return -1; }					// CC 2.1: return error if read-only entry
+	// if(newPage.readOnly) { return -1; }					// CC 2.1: return error if read-only entry
 	
 	// NEW T2.2: Handle policy flags
 	newPage.used = true;							// flag page as read
@@ -167,12 +186,12 @@ public class UserProcess {
 	// int curr_paddr = (curr_ppn*pageSize) + voffset;
 	if(curr_ppn < 0 || curr_ppn >= Machine.processor().getNumPhysPages()) {	
 	    return 0;								// return 0 bytes transferred
-	}    
+	}
+	
 	int next_npaddr = (newPage.ppn + 1)*pageSize;				// fetch addr of next page table entry
 	int paddr = next_npaddr + voffset; 					// store offset next page table entry
-	
 	int amount = Math.min(length, memory.length-vaddr);
-	System.arraycopy(memory, paddr, data, offset, amount);		// move to physical memory
+	System.arraycopy(memory, paddr, data, offset, amount);			// move to physical memory
 	
 	return amount;
     }
@@ -210,10 +229,32 @@ public int writeVirtualMemory(int vaddr, byte[] data, int offset,
 
     // NEW T2.2: Create a new user process reference
     byte[] memory = Machine.processor().getMemory();
+    
+    // NEW T2.2: Handle the virtual-to-physical page address translation
+    int vpn = Processor.pageFromAddress(vaddr);					// store the pte of the curr byte: (vaddr - bytesRead)/pageSize
+    int voffset = Processor.offsetFromAddress(vaddr);				// store offset of user process: (vaddr + bytesRead)%pageSize
 
-    // for now, just assume that virtual addresses equal physical addresses
-    if (vaddr < 0 || vaddr >= memory.length)
-	return 0;
+    //    // for now, just assume that virtual addresses equal physical addresses
+    //    if (vaddr < 0 || vaddr >= memory.length)
+    //	return 0;
+
+    if(vpn >= numPages) {
+	return -1;								// CC T2.2: Return error, do not destroy
+    }
+    // NEW T2.2: Create new virtual-to-physical page translation instance
+    TranslationEntry newPage = pageTable[vpn];   
+
+    if(newPage.readOnly) { return -1; }						// CC T2.2: return error if read-only entry
+
+    // NEW T2.2: Use state variables to handle replacement policy
+    newPage.used = true;							// on visit, flag true
+    newPage.dirty = true;							// on write, flag true
+
+    // NEW T2.2: check if translation out of bounds
+    int curr_ppn = newPage.ppn;
+    if(curr_ppn < 0 || curr_ppn >= Machine.processor().getNumPhysPages()) {	
+	return 0;								// 0 bytes transferred
+    }
 
     int amount = Math.min(length, memory.length-vaddr);
     System.arraycopy(data, offset, memory, vaddr, amount);
@@ -322,7 +363,24 @@ protected boolean loadSections() {
 	Lib.debug(dbgProcess, "\tinsufficient physical memory");
 	return false;
     }
-
+    // NEW T2.2: Load (allocate) pageTable entries 
+    pageTable = new TranslationEntry[numPages];
+    for(int i = 0; i < numPages; i++) {
+	int pp = UserKernel.getFreePage();
+	if(pp < 0) {
+	    for(int j = 0; j < i; j++) {
+		// NEW T2.2: Deallocate valid virtual pages
+		if(pageTable[j].valid) {
+		    UserKernel.returnFreePage(pageTable[j].ppn);
+		    pageTable[j].valid = false;					// flag for removal	
+		}
+	    }
+	    coff.close();
+	    return false;
+	}
+	pageTable[i] = new TranslationEntry(i, pp, true, false, false, false);
+    }
+    
     // load sections
     for (int s=0; s<coff.getNumSections(); s++) {
 	CoffSection section = coff.getSection(s);
@@ -358,7 +416,7 @@ public void initRegisters() {
     Processor processor = Machine.processor();
 
     // by default, everything's 0
-    for (int i=0; i<processor.numUserRegisters; i++)
+    for (int i=0; i< processor.numUserRegisters; i++)
 	processor.writeRegister(i, 0);
 
     // initialize PC and SP according
@@ -471,6 +529,10 @@ protected Coff coff;
 
 /** This process's page table. */
 protected TranslationEntry[] pageTable;
+
+/** This process's children */
+private LinkedList<Integer> childPT = new LinkedList<Integer>();
+
 /** The number of contiguous pages occupied by the program. */
 protected int numPages;
 
