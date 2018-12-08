@@ -5,6 +5,9 @@ import nachos.threads.*;
 import nachos.userprog.*;
 
 import java.io.EOFException;
+import java.io.FileDescriptor;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 
 /**
@@ -23,29 +26,43 @@ public class UserProcess {
     /**
      * Allocate a new process.
      */
-    
     //NEW T2.2: Support for fragmentation in physical memory (allocate child)
+    private UThread thread;					// thread associated with running process
     private int process_id;					// unique id of process
-    private UThread thread;					// user thread allocation
+    public int status;						// flag for execution + termination handling
     private int parent_pid;					// unique id of parent process
     
-    // NEW T2.3: Support for multiprogramming
+    /*// NEW T2.3: Support for multiprogramming
     class childProcess {
-	private static final int START = -100;			// dummy var to init status
+	
 	UserProcess child;					// allocate fragmented user process
 	
 	childProcess(UserProcess up) {
 	    this.child = up;
-	    this.status = START;				// init user process to START
-	    process_id = UserKernel.getFreePage();			// return next page id
+	    status = START;					// init user process to START
+	    process_id = UserKernel.getFreePage();		// return next page id (non-contiguous)
+	    processes.put(up, null;
 	}
-    }
-    
+    }*/
     public UserProcess() {
-	int numPhysPages = Machine.processor().getNumPhysPages();
-	pageTable = new TranslationEntry[numPhysPages];
-	for (int i=0; i<numPhysPages; i++)
-	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+	status = START;						// init to EXIT code
+	process_id = UserKernel.getNextProcessId();
+	UserKernel.getProcess(this, process_id);		// put null instance into process map
+	
+	for(int i = 0; i < MAX_FILES; i++) {
+	    process_fd[i] = new FileDescriptor();
+	}
+	
+	process_fd[0].file = UserKernel.console.openForReading();
+	Lib.assertTrue(process_fd[0] != null);
+	
+	process_fd[1].file = UserKernel.console.openForWriting();
+	Lib.assertTrue(process_fd[1] != null);
+	
+	process_id = UserKernel.getNextProcessId();
+	
+	UserKernel.getProcess(this, process_id);
+	
     }
 
     /**
@@ -366,7 +383,7 @@ protected boolean loadSections() {
     // NEW T2.2: Load (allocate) pageTable entries 
     pageTable = new TranslationEntry[numPages];
     for(int i = 0; i < numPages; i++) {
-	int pp = UserKernel.getFreePage();
+	int pp = UserKernel.getNextProcessId();
 	if(pp < 0) {
 	    for(int j = 0; j < i; j++) {
 		// NEW T2.2: Deallocate valid virtual pages
@@ -380,7 +397,7 @@ protected boolean loadSections() {
 	}
 	pageTable[i] = new TranslationEntry(i, pp, true, false, false, false);
     }
-    
+
     // load sections
     for (int s=0; s<coff.getNumSections(); s++) {
 	CoffSection section = coff.getSection(s);
@@ -399,11 +416,455 @@ protected boolean loadSections() {
     return true;
 }
 
-/**
- * Release any resources allocated by <tt>loadSections()</tt>.
- */
+private int handleCreat(int file1) {
+    int descriptor = -1;		 								// Default the description to -1
+    int i;														// To increment through file indexes
+    int j = 0;													// To increment through creatArray[]
+    int creatArray[] = new int[255];							// New array to hold all null values
+    String fileName = readVirtualMemoryString(file1, MAX_BYTES);	// File to create
+
+    /* 
+     * Parse through the file to find which file indexes are null
+     */
+    Lib.debug(dbgProcess, "handleCreat: Going through the file...");
+    for (i = 0; i < this.file.length; i++){
+	if (file[i] == null){
+	    descriptor = i;										// Set descriptor to value of null index
+	    creatArray[j] = i;									// Keep track of all index values that are null in this array
+	    j++;												// Increment to next creatArray[] index
+	}
+    }
+
+    /*
+     * Debug process to make sure which values are null in the file index
+     */
+    Lib.debug(dbgProcess, "handleCreat: Checking in array which descriptor values are null:");
+    for(i=0; i < creatArray.length; i++) {
+	Lib.debug(dbgProcess, "handleCreat: Value of creatArray[" + i + "] is: " + creatArray[i]);
+    }
+
+    /*
+     * If file descriptor was not created and the previous for loop did not work right, return an error
+     */
+    if (descriptor == -1){
+	Lib.debug(dbgProcess,"handleCreat: Error, did not create a file descriptor!");
+	return -1;
+    }
+
+
+    /*
+     * If file is not valid or does not exist, return an error
+     */
+    if (fileName == null || fileName.length() == 0){
+	Lib.debug(dbgProcess, "handleCreat: Error, invalid file.");
+	return -1;
+    }
+
+    /*
+     * Open the file 'fileName' from the kernel
+     */
+    Lib.debug(dbgProcess, "");
+    OpenFile fileOpen = UserKernel.fileSystem.open(fileName, true);
+
+    /*
+     * If file is empty, return an error
+     */
+    if (fileOpen == null){
+	Lib.debug(dbgProcess, "handleCreat: Error, file is empty.");
+	return -1;
+    }
+
+    Lib.debug(dbgProcess, "handleCreat: Success! This file is now created.");
+    this.file[descriptor] = fileOpen;							// Open the file created
+
+    return descriptor;											// Returning that this file is now open
+}
+
 protected void unloadSections() {
-}    
+    //close the coff file
+    coff.close();
+    //empty out page tables(Kernel and Process)
+    for(int i = 0; i < numPages; i++){
+        UserKernel.freeUpPage(pageTable[i].ppn);
+        pageTable[i] = null;
+    }
+}
+
+
+
+/*
+Handle the open() system call.
+ */
+private int handleOpen(int file2) {
+    int descriptor = -1;		 								// Default the description to -1
+    int i;														// To increment through file indexes
+    int j = 0;													// To increment through openArray[]
+    int openArray[] = new int[255];								// New array to hold all null values
+    String filename = readVirtualMemoryString(file2, MAX_BYTES);	// New file to open
+
+    /*
+     * Parse through the file to find which index values are null
+     */
+    Lib.debug(dbgProcess, "handleOpen: Checking which index values are null:");
+    for (i = 0; i < this.file.length; i++){
+	if (file[i] == null){
+	    descriptor = i;
+	    openArray[j] = i;
+	    j++;
+	}
+    }
+
+    /*
+     * Debug process to make sure which values are null in the file index
+     */
+    Lib.debug(dbgProcess, "handleOpen: Checking in array which descriptor values are null:");
+    for(i=0; i < openArray.length; i++) {
+	Lib.debug(dbgProcess, "handleOpen: Value of openArray[" + i + "] is: " + openArray[i]);
+    }
+
+    /*
+     * If nothing written to descriptor, return an error
+     */
+    if (descriptor == -1){
+	Lib.debug(dbgProcess, "handleOpen: Error: Nothing written to descriptor.");
+	return -1;
+    }
+
+    /*
+     * If invalid file name, return an error
+     */
+    if (filename == null || filename.length() == 0){
+	Lib.debug(dbgProcess, "handleOpen: Error: Invalid filename");
+	return -1;
+    }
+
+    /*
+     * Removing the last open file from the kernel
+     */
+    OpenFile fileOpen = UserKernel.fileSystem.open(filename, false);
+
+    /*
+     * If file is empty, return an error
+     */
+    if (fileOpen == null){
+	Lib.debug(dbgProcess, "handleOpen: Error: No file open");
+	return -1;
+    }
+
+    Lib.debug(dbgProcess, "handleOpen: Success! File is opened.");
+    this.file[descriptor] = fileOpen;							// Open the file
+
+    return descriptor;											// Return this file as the current open file
+}
+
+private int handleRead(int a, int b, int c) {
+    int descriptor = a;											// For this file descriptor
+    int buff = b;												// For the buffer
+    int count = c;												// For the counter
+    byte[] testBuff = new byte[1];
+    int readByte = 0;											// Counter for bytes read
+    int read;
+
+    /*
+     * If we have a negative count, return an error
+     */
+    if(count < 0) {
+	Lib.debug(dbgProcess, "handleRead: Error, negative counter.");
+	return -1;
+    }
+
+    /*
+     * Check that the buffer is valid before continuing
+     */
+    if(readVirtualMemory(buff,testBuff,0,1) != 1) {
+	Lib.debug(dbgProcess, "handleRead: Error: Buffer invalid");
+	return -1;
+    }
+
+    /*
+     * If descriptor is outside of byte range, return an error
+     */
+    if(descriptor < 0 || descriptor > 15) {
+	Lib.debug(dbgProcess, "handleRead: Error: Descriptor out of byte range");
+	return -1;
+    }
+
+    /*
+     * If no file descriptor, return an error
+     */
+    if(file[descriptor] == null) {
+	Lib.debug(dbgProcess, "handleRead: Error: No file descriptor given");
+	return -1;
+    }
+
+    byte[] byteCount = new byte[count];							// New byte for count value
+
+    /*
+     * While there's still bytes to read, get the file and read to a new array
+     */
+    while(readByte < count) {
+	read = file[a].read(byteCount, readByte, count - readByte);
+	if(read < 0) {											// If negative value read, return error
+	    Lib.debug(dbgProcess, "handleRead: Error: Negative value read");
+	    return -1;
+	}
+	readByte += read;										// Increment bytes read counter
+    }
+
+    /*
+     * If bytes read aren't written to the virtual memory, return an error
+     */
+    if(writeVirtualMemory(buff, byteCount, 0, readByte) != readByte) {
+	Lib.debug(dbgProcess, "handleRead: Error: Virtual memory not equal to the bytes read");
+	return -1;
+    }
+
+    Lib.debug(dbgProcess, "handleRead: Success!");
+    return readByte;
+}
+
+private int handleWrite(int a, int b, int c) {
+    //		Lib.debug(dbgProcess, "");
+    int fileDes = a;											// File Descriptor
+    int buffPt = b;												// Buffer pointer
+    int buffSize = c;											// Buffer Size
+    int zeroCtr = 0;											// Counts zero values while we fill the buffer
+    int reader = 0;												// Holds max of buffer size
+    int dataWrite = 0;											// Holds data to write to the buffer
+    int countStuck = 0;											// Counts when the program gets stuck attempting to write
+
+    byte[] buffTest = new byte[1];								// Variable to test if the buffer pointer is accurate
+    byte[] buff = new byte[buffSize];							// Create new buffer of size of buffer size
+
+    int numRead = readVirtualMemory(buffPt, buff, reader, buffSize - reader);
+
+    if(buffSize < 0) {											// Return false if negative buffer size
+	return -1;
+    }
+
+    /*
+     * Checks that the validity of buffer pointer before continuing
+     */
+    Lib.debug(dbgProcess, "Testing if our buffer pointer is valid.");
+    if(readVirtualMemory(buffPt, buffTest, 0, 1) != 1) {		// Compare buffer pointer to the buffer test variable
+	return -1;												// If not equal, then False
+    }
+
+    /*
+     * While there's still buffer space remaining, write to reader.
+     */
+    Lib.debug(dbgProcess, "Filling up reader to buffer size");
+    while(reader < buffSize) {
+	reader += numRead;										// Increments reader until it reaches [buffSize] - 1
+
+	/*
+	 * If zero counter has increased at some prior point, reset to zero here as we have a success.
+	 */
+	if(zeroCtr > 0) {
+	    Lib.debug(dbgProcess, "handleWrite: Success, reseting zero counter to 0.");
+	    zeroCtr = 0;
+	}
+	/*
+	 * If zero counter has increased 3 or more times, return an error; something has gone wrong
+	 */
+	if (numRead == 0) {
+	    if (++zeroCtr > 2) {
+		Lib.debug(dbgProcess, "handleWrite: Zero Counter has incremented 3 times. There is an error.");
+		return -1;
+	    }
+	}
+    }
+
+    /*
+     * If there's an actual valid file open, then
+     * while there's still buffer to write to the open file
+     */
+    Lib.debug(dbgProcess, "handleWrite: Checking if we have a valid file open and buffer to use.");
+    if(fileDes > -1 && file[fileDes] != null && fileDes < file.length) {
+	while(dataWrite < buffSize && countStuck < 3) {			// If stuck counter gets to 3 or larger, stop attempting to write to open file
+	    int newWriter = file[fileDes].write(buff, 		// Write to the current open file, save in newWriter to preserve dataWrite
+		    dataWrite, buffSize - dataWrite);			
+	    dataWrite += newWriter;								// Add values of newWriter to dataWrite
+
+	    Lib.debug(dbgProcess, "handleWrite: Checking if counter is stuck");
+	    if(newWriter == 0) {								// If nothing written to newWriters, increment stuck counter
+		countStuck++;
+	    }
+
+	    Lib.debug(dbgProcess, "handleWrite: Checking newWriter variable validity");
+	    if(newWriter == 1) {								// If newWriter variable is 1, return error
+		return -1;
+	    }
+	}
+
+	Lib.debug(dbgProcess, "handleWrite: Checking if stuck counter has reached 3. Terminating program if so.");
+	if(countStuck > 2) {									// Once stuck counter reaches 3 or larger, end while loop and return data written
+	    return dataWrite;
+	}
+    }
+    else {														// Return an error if no valid file
+	return -1;
+    }
+
+    Lib.debug(dbgProcess, "handleWrite: Write successful! Finalizing write.");
+    return dataWrite;											// Save data written
+}	
+
+/**
+ * Move process to child instance and executes with the given arguments 
+ * @return	child_pid 	process_id of child instance 
+ * 
+ * @param	file1		null-terminated string specifying name of .coff executable file
+ * @param	argc 		non-negative count of required processes to allocate
+ * @param	argv		array of null-terminated file strings beginning at argv[0] to argv[argc-1]
+ */
+private int handleExec(int file1, int argc, int argv) {
+    if (argc < 1) {
+	Lib.debug(dbgProcess, "argc is not a positive value!: " + argc);
+	return -1;
+    }
+
+    //Initializes a string that will take in the name of the file
+    String nameOfFile = readVirtualMemoryString(file1, MAX_BYTES);		
+
+    if (nameOfFile == null) {
+	Lib.debug(dbgProcess, "The name of the file is invalid!");
+	return -1;
+    }
+
+    //Next, create a string that will take in the extension of the file to check if it is
+    //a valid .coff file
+    String extension = nameOfFile.substring(nameOfFile.length() - 4, nameOfFile.length());		//Creates a substring for the name of the file extension
+    if(!extension.equals(".coff")) {
+	Lib.debug(dbgProcess, "The file is not a valid .coff file!");
+	return -1;
+    }
+    //----------------------------------------------------------------------------------------------------------------
+    String arrArg[] = new String[argc];		//allocate a new array of strings populated of amount argc
+    byte check[] = new byte[4];				//The memory allocation must take into considereation of a size 4 bytes
+    for(int i = 0; i < argc; i++){			//Cycles through the amount of arguments argc
+	int argBytes = readVirtualMemory(argv+i*4, check);
+	if(argBytes != 4)
+	    return -1;
+
+	int addressOfArgc = Lib.bytesToInt(check, 0);
+	arrArg[i] = readVirtualMemoryString(addressOfArgc, MAX_BYTES);
+    }
+
+    ///---------------------------------------------------------------------------------------------------------------
+    //uses another process derived from userprocess 
+    UserProcess anotherProcess = UserProcess.newUserProcess();
+    
+    anotherProcess.parent_pid = this.process_id;
+    this.childPT.add(anotherProcess.process_id);
+
+    boolean runExecute = anotherProcess.execute(nameOfFile, arrArg);
+
+    if(runExecute) {
+	return anotherProcess.process_id;
+    }
+    else {
+	Lib.debug(dbgProcess, "The address is invalid!");
+	return -1;			
+    }
+
+}
+
+/**
+ * Close a file descriptor, so that it no longer refers to any file or stream
+ * and may be reused.
+ *
+ * If the file descriptor refers to a file, all data written to it by write()
+ * will be flushed to disk before close() returns.
+ * If the file descriptor refers to a stream, all data written to it by write()
+ * will eventually be flushed (unless the stream is terminated remotely), but
+ * not necessarily before close() returns.
+ *
+ * The resources associated with the file descriptor are released. If the
+ * descriptor is the last reference to a disk file which has been removed using
+ * unlink, the file is deleted (this detail is handled by the file system
+ * implementation).
+ *
+ * Returns 0 on success, or -1 if an error occurred.
+ */
+private int handleClose(int fileDescriptor) {
+    Lib.debug(dbgProcess, "handleClose: Closing a file");
+    /*
+     * Check if fileDescriptor is valid before doing anything
+     */
+    if(fileDescriptor < 0)												// Check fileDescriptor is within bounds of 1-16 in size
+	return -1;														// Error if less than 0
+    if(fileDescriptor > 15)
+	return -1;														// Error if greater than 15
+
+    OpenFile closingFile;
+    closingFile = this.file[fileDescriptor];						// File to be closed
+
+    Lib.debug(dbgProcess, "handleClose: Checking if the file being closed is valid");
+    if(closingFile == null || closingFile.length() < 0)					// If there's no file or data stored, return an error
+	return -1;
+
+    closingFile.close();
+
+    Lib.debug(dbgProcess, "handleClose: Checking to see if file is closed yet:");
+    if(closingFile.length() != -1)
+	return -1;
+
+    this.file[fileDescriptor] = null;								// Free up the file descriptor
+
+    Lib.debug(dbgProcess, "handleClose: File was closed successfully");
+    return 0;															// Return success
+}
+
+private int handleUnlink(int nameAddr) {
+    String name;														// For the file name
+    boolean closed;														// If the file is closed, true or false
+
+    name = readVirtualMemoryString(nameAddr, MAX_BYTES);					// Get the address in memory for the file's name
+
+    Lib.debug(dbgProcess, "handleUnlink: Checking if we have an accurate memory address for our file:");
+    if(name.length() == 0 || name == null)
+	return -1;
+
+    Lib.debug(dbgProcess, "handleUnlink: Successfully found memory address. Removing file from memory: ");
+    closed = UserKernel.fileSystem.remove(name);						// Remove the file from memory
+
+    Lib.debug(dbgProcess, "handleUnlink: Checking if file was properly removed: ");
+    if(!closed)
+	return -1;														// If file wasn't removed from memory, return an error
+
+    Lib.debug(dbgProcess, "handleUnlink: Successfully closed file and removed from memory.");
+    return 0;															// Return success
+}
+
+private void handleExit(int status){
+
+    for(int i = 0; i < MAX_FILES; i++) {
+	if(process_fd[i].file != null) {
+	    handleClose(i);
+	}
+    }
+
+    //nullify all children's parents
+    while(childPT != null && !childPT.isEmpty()){
+	int child_ptr = childPT.removeFirst();
+	UserProcess child_rm = UserKernel.getProcessById(child_ptr);
+	
+        child_rm.parent_pid = 1;			//set the root to 1
+    }
+    //release resources allocated by pages since they shouldn't be in  use anymore
+    this.unloadSections();
+
+    if(this.process_id == 1) {
+	Kernel.kernel.terminate();                      // terminate this kernel
+    }
+    
+    else {						//we are the root parent. I am the Terminator
+	// check if current KThread is UThread instance
+	Lib.assertTrue(KThread.currentThread() == this.thread);
+	KThread.finish();
+    }
+}
 
 /**
  * Initialize the processor's registers in preparation for running the
@@ -482,9 +943,45 @@ syscallUnlink = 9;
  */
 public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
     switch (syscall) {
+
     case syscallHalt:
 	return handleHalt();
 
+    case syscallCreate:
+             
+	return handleCreat(a0); 
+
+    case syscallOpen:
+	            
+	return handleOpen(a0);   
+
+    case syscallRead:
+	            
+	return handleRead(a0, a1, a2); 
+
+    case syscallWrite:
+	           
+	return handleWrite(a0, a1, a2);
+
+    case syscallClose:
+	         
+	return handleClose(a0);
+
+    case syscallUnlink:
+	
+	return handleUnlink(a0);                    
+
+    case syscallExit:                               
+	
+	handleExit(a0);                              
+	Lib.assertNotReached();                    
+	return 0;                                         
+
+    case syscallExec:                                
+	return handleExec(a0, a1, a2);              
+
+    case syscallJoin:                               
+	return handleJoin(a0, a1);                  
 
     default:
 	Lib.debug(dbgProcess, "Unknown syscall " + syscall);
@@ -523,15 +1020,110 @@ public void handleException(int cause) {
     }
 }
 
+/**
+ * Handle an attempt to join a current thread by a child process's thread. 
+ * Called by <tt>UserKernel.exceptionHandler()</tt>. 
+ * 
+ * If process is a child process, remove the child from childPT list
+ *   Else not a child, @return -1
+ * If the child process finished after call (null) @return -2
+ * Else attempt to join child process to current thread
+ * Remove child from kernel
+ * Write the p_status to virtual memory 
+ * 
+ * @param	child_pid	the process id of the child thread
+ * @param	p_status	the 4-byte exit status
+ */
+private int handleJoin(int child_pid, int p_status) {
+    
+    boolean isChild = false;				// return true if child process of curr thread
+    int temp;						// allocate byte to store status
+    Iterator<Integer> it = this.childPT.iterator();	
+    
+    while(it.hasNext()) {				// iterate over child process list
+	temp = it.next();
+	
+	if(temp == child_pid) {
+	    it.remove();
+	    isChild = true;
+	    break;					// found a child process, done
+	}
+    }
+    if(isChild == false) {				// no children in childPT list
+	return -1;					// return error code
+    }
+    
+    UserProcess child = UserKernel.getProcessById(child_pid);
+    
+    if(child == null) {					// dead on arrival
+	return -2;					// already joined
+    }
+    
+    // TO DO T2.3: Attempt to join child to thread
+    child.thread.join();
+    
+    // Notes: need exit status var, newUserProcess(), execute(), bytesFromInt()
+    byte temp_arr[] = new byte[4];
+    
+    temp_arr = Lib.bytesFromInt(child.status);
+    int count = writeVirtualMemory(p_status, temp_arr);
+    
+    if(count != 4) {
+	return 1;
+    }
+    else { 
+	return 0;
+    } 
+}
+
+/** Find the first empty position */
+private int findEmptyFileDescriptor() {
+    for(int i = 0; i < MAX_FILES; i++) {
+	if(process_fd[i].file == null) {
+	    return i;					// index of null byte
+	}
+    }
+    return -1;						// error, no free space
+}
+
+
+/** Find the first position matching @param filename */
+private int fileFileDescriptorByName(String filename) {
+    for(int i = 0; i < MAX_FILES; i++) {
+	if(process_fd[i].filename.equals(filename)) {
+	    return i;					// matches desired filename 
+	}
+    }
+    return -1;						// error, no matching file in FD array
+}
 
 /** The program being run by this process. */
 protected Coff coff;
+
+//NEW VARIABLES
+public static final int MAX_FILES = 16;								// Maximum number of opened files per process = 16			
+
+public OpenFile[] file;
+
+public class FileDescriptor {
+    public FileDescriptor() { }
+    	private String filename = "";
+    	private OpenFile file = null;
+    	private boolean file_rm = false;
+}
+
+private FileDescriptor process_fd[] = new FileDescriptor[MAX_FILES];
+
+private static final int MAX_BYTES = 256;
 
 /** This process's page table. */
 protected TranslationEntry[] pageTable;
 
 /** This process's children */
 private LinkedList<Integer> childPT = new LinkedList<Integer>();
+
+/** The EXIT flag stored as an int */
+private static final int START = -255;
 
 /** The number of contiguous pages occupied by the program. */
 protected int numPages;

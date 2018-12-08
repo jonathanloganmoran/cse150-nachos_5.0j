@@ -1,5 +1,7 @@
 package nachos.userprog;
 
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 
 import nachos.machine.*;
@@ -44,30 +46,30 @@ public class UserKernel extends ThreadedKernel {
     }
 
     /**
-    * Function returns an entry from the freePageList
-    * 
-    * @return free page in range from 0 to numPhysPages-1
-    * If no free pages, return -1
-    */
-    public static int getFreePage() {
-      	int freePageNumber = -1;
-        	
-    	// Attempt to acquire the lock in order to access the free page list
-      	Machine.interrupt().disable();
+     * Function returns an entry from the freePageList by process id
+     * 
+     * @return page with matching process id from freePageList
+     * If no matching page is found, @return -1
+     */
+     public static int getFreePage() {
+       	int freePageNumber = -1;
         
-        // Get the number for a free page, if any
-        if(!freePageList.isEmpty()) {
-        	freePageNumber = freePageList.removeFirst();
-        }
+     	// Attempt to acquire the lock in order to access the free page list
+       	Machine.interrupt().disable();
+        UserProcess returned;
         
-        // Release the lock, waking up a process waiting to acquire this lock, if any
-        Machine.interrupt().enable();
-        
-        return freePageNumber;
-    }
-        
+         // Return the page with matching page number 
+         while(!freePageList.isEmpty()) {
+         	freePageNumber = freePageList.removeFirst();
+         }
+         // Release the lock, waking up a process waiting to acquire this lock, if any
+         Machine.interrupt().enable();
+         
+         return freePageNumber;
+     }
+
     /**
-     * This function returns an entry back to the freePageList
+     * This function puts the pageNumber of a process onto the freePageList
      * 
      */
     public static void returnFreePage(int pageNumber) {
@@ -78,22 +80,58 @@ public class UserKernel extends ThreadedKernel {
        	Machine.interrupt().disable();
        	
        	//Return the page to the free page list
-       	freePageList.add(pageNumber);
+       	freePageList.addFirst(pageNumber);
        	
        	//Release the lock, waking up a process waiting to acquire this lock, if any
        	Machine.interrupt().enable();
     }
     
-     /**
-      * This function returns the next available process id
-      * 
-      */
+    /**
+     * This function returns the UserThread associated with the process id
+     * 
+     * @param		pid (key)
+     * @return		associated UserThread instance from HashMap
+     */
+   public static UserProcess getProcessById(int pid) {
+	return processes.get(pid);
+   }
+   
+   /**
+    * This function stores the UserThread and associated process id into the HashMap
+    * 
+    * @param		pid (key)
+    * @param		UserThread instance
+    * @return		the associated UserThread instance
+    */
+   public static UserProcess getProcess(UserProcess up, int pid) {
+       UserProcess add_up;
+       // acquire lock for preemption handling
+       Machine.interrupt().disable();
+       add_up = processes.put(pid, up);			// return matching instance
+       Machine.interrupt().enable();
+
+       return add_up;
+   }
+
+   //Used to clear page entries within UserProcess
+   public static void freeUpPage(int num) {
+       Lib.assertTrue(num >= 0 && num < Machine.processor().getNumPhysPages());
+      
+       Machine.interrupt().disable();
+       freePageList.addFirst(num);			//add to the beginning
+       Machine.interrupt().enable();
+
+   }
+   /**
+    * This function returns the next available process id in the 
+    * contiguous address space of the page table
+    * 
+    */
     public static int getNextProcessId() {
-	int new_pid;
-	Machine.interrupt().disable();
-	new_pid = ++next_processid;
+	Machine.interrupt().disable();			// get kernel access
+	++next_pid;					// increment static block pointer
 	Machine.interrupt().enable();
-	return next_processid;
+	return next_pid;				// return pid of next contiguous block
     }
     /**
      * Test the console device.
@@ -179,9 +217,12 @@ public class UserKernel extends ThreadedKernel {
     // NEW P2: global free page list, protected by Lock
     private static LinkedList<Integer> freePageList = new LinkedList<Integer>();
     // CHANGE TO Machine.interrupt() <-- private static Lock freePageListLock;
-
-    /** Store the next available process id to be assigned */
-    private static int next_processid;
+    
+    /** Store the global process map, containing a UserProcess instance and the associated process id*/
+    private static HashMap<Integer, UserProcess> processes = new HashMap<Integer, UserProcess>();
+    
+    /** Store the next available process id last assigned (contiguous malloc) */
+    private static int next_pid;
     
     // dummy variables to make javac smarter
     private static Coff dummy1 = null;
