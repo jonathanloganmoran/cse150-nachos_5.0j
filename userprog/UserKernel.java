@@ -30,19 +30,49 @@ public class UserKernel extends ThreadedKernel {
 	super.initialize(args);
 	console = new SynchConsole(Machine.console());
 	
+	process_idLock = new Semaphore(1);
+	freePagesLock = new Semaphore(1);
+
+	// NEW T2.2: Get the number of the machines physical pages
+	int numPhysPages = Machine.processor().getNumPhysPages();
+
+	// Initialize the free page list and fill with Machine.numPhysPages number of pages
+	for(int i = 0; i < numPhysPages; i++) {
+	    getFreePageList().add(i);
+	}
+	
 	Machine.processor().setExceptionHandler(new Runnable() {
 	    public void run() { exceptionHandler(); }
 	});
-	
-	// NEW T2.2: Get the number of the machines physical pages
-	int numPhysPages = Machine.processor().getNumPhysPages();
-	
-	// Initialize the free page list and fill with Machine.numPhysPages number of pages
-	// MOVE OUTSIDE METHOD: freePageList = new LinkedList<Integer>();
-	for(int i = 0; i < numPhysPages; i++) {
-		freePageList.add(i);
-	}
 			
+    }
+
+    /**
+     * @return the freePageList
+     */
+    public static LinkedList<Integer> getFreePageList() {
+	return freePageList;
+    }
+
+    /**
+     * @param freePageList the freePageList to set
+     */
+    public static void setFreePageList(LinkedList<Integer> freePageList) {
+	UserKernel.freePageList = freePageList;
+    }
+
+    /**
+     * @return the processes
+     */
+    public static HashMap<Integer, UserProcess> getProcessesMap() {
+	return processes;
+    }
+
+    /**
+     * @param processes the processes to set
+     */
+    public static void setProcessesMap(HashMap<Integer, UserProcess> processes) {
+	UserKernel.processes = processes;
     }
 
     /**
@@ -56,11 +86,10 @@ public class UserKernel extends ThreadedKernel {
         
      	// Attempt to acquire the lock in order to access the free page list
        	Machine.interrupt().disable();
-        UserProcess returned;
         
          // Return the page with matching page number 
-         while(!freePageList.isEmpty()) {
-         	freePageNumber = freePageList.removeFirst();
+         while(!getFreePageList().isEmpty()) {
+         	freePageNumber = getFreePageList().removeFirst();
          }
          // Release the lock, waking up a process waiting to acquire this lock, if any
          Machine.interrupt().enable();
@@ -80,7 +109,7 @@ public class UserKernel extends ThreadedKernel {
        	Machine.interrupt().disable();
        	
        	//Return the page to the free page list
-       	freePageList.addFirst(pageNumber);
+       	getFreePageList().addFirst(pageNumber);
        	
        	//Release the lock, waking up a process waiting to acquire this lock, if any
        	Machine.interrupt().enable();
@@ -93,7 +122,7 @@ public class UserKernel extends ThreadedKernel {
      * @return		associated UserThread instance from HashMap
      */
    public static UserProcess getProcessById(int pid) {
-	return processes.get(pid);
+	return getProcessesMap().get(pid);
    }
    
    /**
@@ -107,7 +136,7 @@ public class UserKernel extends ThreadedKernel {
        UserProcess add_up;
        // acquire lock for preemption handling
        Machine.interrupt().disable();
-       add_up = processes.put(pid, up);			// return matching instance
+       add_up = getProcessesMap().put(pid, up);			// return matching instance
        Machine.interrupt().enable();
 
        return add_up;
@@ -118,7 +147,7 @@ public class UserKernel extends ThreadedKernel {
        Lib.assertTrue(num >= 0 && num < Machine.processor().getNumPhysPages());
       
        Machine.interrupt().disable();
-       freePageList.addFirst(num);			//add to the beginning
+       getFreePageList().addFirst(num);			//add to the beginning
        Machine.interrupt().enable();
 
    }
@@ -213,6 +242,9 @@ public class UserKernel extends ThreadedKernel {
 
     /** Globally accessible reference to the synchronized console. */
     public static SynchConsole console;
+    
+    public static Semaphore freePagesLock;
+    public static Semaphore process_idLock;
     
     // NEW P2: global free page list, protected by Lock
     private static LinkedList<Integer> freePageList = new LinkedList<Integer>();
