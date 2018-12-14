@@ -254,7 +254,7 @@ public class UserKernel extends ThreadedKernel {
     private static HashMap<Integer, UserProcess> processes = new HashMap<Integer, UserProcess>();
     
     /** Store the next available process id last assigned (contiguous malloc) */
-    private static int next_pid;
+    public static int next_pid = 0;
     
     // dummy variables to make javac smarter
     private static Coff dummy1 = null;

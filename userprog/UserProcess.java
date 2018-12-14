@@ -26,14 +26,10 @@ public class UserProcess {
     /**
      * Allocate a new process.
      */
-    //NEW T2.2: Support for fragmentation in physical memory (allocate child)
-    private UThread thread;					// thread associated with running process
-    protected static int process_id;				// unique id of process
-    
+    //NEW T2.2: Support for fragmentation in physical memory
+    protected int process_id;					// unique id of this current process  
     private Semaphore joined = new Semaphore(0);		// atomically put parent thread to sleep
-    private static int next_pid;				// unique id of next process
     public int status;						// flag for execution + termination handling
-    
     
     /*// NEW T2.3: Support for multiprogramming
     class childProcess {
@@ -56,20 +52,20 @@ public class UserProcess {
     public UserProcess() {
 	// allocate a new process_id to the current
 	UserKernel.process_idLock.P();
-	process_id = UserKernel.getNextProcessId();
+	//process_id = UserKernel.getNextProcessId();
+	process_id = UserKernel.next_pid;			// store the global next free process_id
+	UserKernel.next_pid++;					// increment next available pid
 	UserKernel.process_idLock.V();
 		
 	int numPages = Machine.processor().getNumPhysPages();
 	pageTable = new TranslationEntry[numPages];
 	
-	for(int i = 0; i < numPages; i++) {
-	    // initialize new entry with ppn = vpn in contiguous memory
+	for(int i = 0; i < numPages; i++) {			// initialize pageTable with TranslationEntry instances
 	    pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
-	    
+	    // contiguous allocation where spn = ppn = index of pte
 	}
 	
 	file = new OpenFile[MAX_FILES];
-	status = START;						// init to EXIT code
 	file[0] = UserKernel.console.openForReading();
 	file[1] = UserKernel.console.openForWriting();
     }
@@ -98,8 +94,7 @@ public class UserProcess {
 	    return false;
 
 	// NEW T2.2: Initialize new UThread instance
-	thread = new UThread(this);
-	thread.setName(name).fork();
+	new UThread(this).setName(name).fork();
 
 	return true;
     }
@@ -186,8 +181,14 @@ public class UserProcess {
 	// NEW T2.2: Handle the virtual-to-physical page address translation
 	int vpn = Processor.pageFromAddress(vaddr);				// store the pte of the curr byte: (vaddr - bytesRead)/pageSize
 	int voffset = Processor.offsetFromAddress(vaddr);			// store offset of user process: (vaddr + bytesRead)%pageSize
+	
+	// NEW T2.2: Create new virtual-to-physical page translation instance
+	TranslationEntry newPage = pageTable[vpn];   
+	// NEW T2.2: Handle policy flags
+	newPage.used = true;							// flag page as read
+	int ppn_addr = newPage.ppn*pageSize + voffset;
 
-	if(vpn < 0 || vpn >= memory.length) {					// check if valid
+	if(ppn_addr < 0 || ppn_addr >= memory.length) {					// check if valid
 	    return 0;
 	}
 
@@ -196,25 +197,16 @@ public class UserProcess {
 	    return -1;								// CC 2.1: DO NOT DESTROY CURR PROCESS
 	}
 	
-	// NEW T2.2: Create new virtual-to-physical page translation instance
-	TranslationEntry newPage = pageTable[vpn];   
-
 	if (!pageTable[vpn].valid) { return -1; }				// CC 2.1: ignore invalid entries
 	// if(newPage.readOnly) { return -1; }					// CC 2.1: return error if read-only entry
+	// newPage.dirty = true;
+	// flag page dirty on read -- second chance policy
 	
-	// NEW T2.2: Handle policy flags
-	newPage.used = true;							// flag page as read
-	// newPage.dirty = true;						// flag page dirty on read -- second chance policy
 	
-	// NEW T2.2: check if translation out of bounds
-	int curr_ppn = newPage.ppn;
-	
-	// int curr_paddr = (curr_ppn*pageSize) + voffset;
-	if(curr_ppn < 0 || curr_ppn >= Machine.processor().getNumPhysPages()) {	
-	    return 0;								// return 0 bytes transferred
-	}
-	
-	int next_npaddr = (newPage.ppn + 1)*pageSize;				// fetch addr of next page table entry
+	/** write @param amount of bytes from @param vaddr 
+	  * into byte @param data array starting at @param offset
+	  */
+	int next_npaddr = (newPage.ppn)*pageSize;				// fetch addr of next page table entry
 	int paddr = next_npaddr + voffset; 					// store offset next page table entry
 	int amount = Math.min(length, memory.length-vaddr);
 	System.arraycopy(memory, paddr, data, offset, amount);			// move to physical memory
@@ -259,26 +251,21 @@ public int writeVirtualMemory(int vaddr, byte[] data, int offset, int length) {
     int vpn = Processor.pageFromAddress(vaddr);					// store the pte of the curr byte: (vaddr - bytesRead)/pageSize
     int voffset = Processor.offsetFromAddress(vaddr);				// store offset of user process: (vaddr + bytesRead)%pageSize
 
-    //    // for now, just assume that virtual addresses equal physical addresses
-    //    if (vaddr < 0 || vaddr >= memory.length)
-    //	return 0;
-
-    if(vpn >= numPages) {
+    /*if(vpn >= numPages) {
 	return -1;								// CC T2.2: Return error, do not destroy
-    }
+    }*/
+    
     // NEW T2.2: Create new virtual-to-physical page translation instance
-    TranslationEntry newPage = pageTable[vpn];   
-
-    if(newPage.readOnly || !newPage.valid) { return -1; }						// CC T2.2: return error if read-only entry
-
+    TranslationEntry newPage = pageTable[vpn];
     // NEW T2.2: Use state variables to handle replacement policy
     newPage.used = true;							// on visit, flag true
-    newPage.dirty = true;							// on write, flag true
+    // newPage.dirty = true;							// on write, flag true
+    int ppn_addr = newPage.ppn*pageSize + voffset;
+    
+    if(newPage.readOnly || !newPage.valid) { return -1; }						// CC T2.2: return error if read-only entry
 
-    // NEW T2.2: check if translation out of bounds
-    int curr_ppn = newPage.ppn;
-    if(curr_ppn < 0 || curr_ppn >= Machine.processor().getNumPhysPages()) {	
-	return 0;								// 0 bytes transferred
+    if(ppn_addr < 0 || ppn_addr >= memory.length) {				// CC T2.2: no free space available
+	return 0;								// zero bytes transferred
     }
 
     int amount = Math.min(length, memory.length-vaddr);
@@ -326,7 +313,10 @@ private boolean load(String name, String[] args) {
 	}
 	numPages += section.getLength();
     }
-
+    
+    // NEW P2: store starting index of user process
+    int toFill = numPages;						// starting index of freePageList
+    
     // make sure the argv array will fit in one page
     byte[][] argv = new byte[args.length][];
     int argsSize = 0;
@@ -351,6 +341,21 @@ private boolean load(String name, String[] args) {
     // and finally reserve 1 page for arguments
     numPages++;
 
+    int endFill = toFill + stackPages + 1;
+    
+    // NEW P2: initialize freePageList with TranslationEntry instances
+    for(int i = toFill; i < endFill; i++) {
+	TranslationEntry newPage = pageTable[i];
+	
+	UserKernel.freePagesLock.P();
+	int free_ppn = UserKernel.getFreePageList().removeFirst();
+	UserKernel.freePagesLock.V();
+	
+	// NEW P2: handle process flags
+	newPage.ppn = free_ppn;						// set ppn to freePagesList empty index
+	newPage.valid = true;						// mark ready to write
+    }
+    
     if (!loadSections())
 	return false;
 
@@ -389,26 +394,28 @@ protected boolean loadSections() {
 	return false;
     }
     // NEW T2.2: Load CoffSection entries 
-    pageTable = new TranslationEntry[numPages];
     for(int s = 0; s < coff.getNumSections(); s++) {
 	CoffSection section = coff.getSection(s);
 	
 	// NEW T2.2: Allocate section length in virtual memory
 	for(int i = 0; i < section.getLength(); i++) {
+	    
 	    int vpn = section.getFirstVPN() + i;
-	    if(vpn == -1) {					// insufficient physical memory
+	    if(vpn == -1) {							// insufficient physical memory
 		coff.close();
 		return false;
 	    }
-	    TranslationEntry entry = pageTable[vpn];
-	    UserKernel.freePagesLock.P();			// acquire lock to handle atomically
-	    entry.ppn = UserKernel.getFreePageList().removeFirst();
-	    UserKernel.freePagesLock.V();			// free lock after ppn write
-	    entry.valid = true;					// mark as valid entry
-	    entry.readOnly = section.isReadOnly();		// check if section is flagged as 'readOnly'
+	    TranslationEntry freePage = pageTable[vpn];
 	    
-	    // load physical pages: spn = section[i], ppn = vpn
-	    section.loadPage(i, entry.ppn);   
+	    UserKernel.freePagesLock.P();					// acquire lock to handle atomically
+	    int free_ppn = UserKernel.getFreePageList().removeFirst();
+	    UserKernel.freePagesLock.V();					// free lock after ppn grab
+	    
+	    freePage.ppn = free_ppn;						// set free page number to empty index
+	    freePage.valid = true;						// mark as valid entry
+	    freePage.readOnly = section.isReadOnly();				// check if section is flagged as 'readOnly'
+	    
+	    section.loadPage(i, freePage.ppn);   				// load physical pages: spn = section[i], ppn = vpn
 	}
     }
     return true;
@@ -418,15 +425,16 @@ protected boolean loadSections() {
  * Release any resources allocated by <tt>loadSections()</tt>.
  */
 protected void unloadSections() {
+    
     //empty out page tables
     for(int i = 0; i < pageTable.length; i++) {
 	TranslationEntry entry = pageTable[i];
 	
 	// check if valid before freeing
 	if(entry.valid) {
-	    UserKernel.freePagesLock.P();			// acquire lock atomically
-	    UserKernel.getFreePageList().add(entry.ppn);	// put entry ppn into freePageList
-	    UserKernel.freePagesLock.V();			// release lock and continue
+	    UserKernel.freePagesLock.P();					// acquire lock atomically
+	    UserKernel.getFreePageList().add(entry.ppn);			// put entry ppn into freePageList
+	    UserKernel.freePagesLock.V();					// release lock and continue
 	}
     }
 }
@@ -455,40 +463,34 @@ public void initRegisters() {
 }
 
 private int handleCreat(int file1) {
-    int descriptor = -1;		 							// Default the description to -1
-    int i;											// To increment through file indexes
-    int j = 0;											// To increment through creatArray[]
-    int creatArray[] = new int[255];								// New array to hold all null values
-    String fileName = readVirtualMemoryString(file1, MAX_BYTES);				// File to create
-
+    String fileName = readVirtualMemoryString(file1, MAX_BYTES);			// File to create
     OpenFile opened_file = Machine.stubFileSystem().open(fileName, true);
+    
     /* 
      * Parse through the file to find which file indexes are null
      */
     Lib.debug(dbgProcess, "handleCreat: Going through the file...");
-    
-    for (i = 0; i < this.file.length; i++){
+    for (int i = 0; i < file.length; i++){
 	if (file[i] == null) {
-	    descriptor = i;									// Set descriptor to value of null index
-	    file[i] = opened_file;								// Keep track of all index values that are null in this array
-	    return i;										// Increment to next creatArray[] index
+	    file[i] = opened_file;							// Keep track of all index values that are null in this array
+	    return i;									// Increment to next descriptor index
 	}
     }
-    return -1;											// ERROR
+    return -1;										// ERROR
 }
 /*
 Handle the open() system call.
  */
 private int handleOpen(int file2) {
-    //int descriptor = -1;		 							// Default the description to -1
-    int i;											// To increment through file indexes
-    //int j = 0;											// To increment through openArray[]
-    int openArray[] = new int[255];								// New array to hold all null values
-    String filename = readVirtualMemoryString(file2, MAX_BYTES);				// New file to open
+    //int descriptor = -1;		 						// Default the description to -1
+    int i;										// To increment through file indexes
+
+    String filename = readVirtualMemoryString(file2, MAX_BYTES);			// New file to open
     OpenFile opened_file = Machine.stubFileSystem().open(filename, false);
-    /*
-     * Parse through the file to find which index values are null
-     */
+   
+
+     /** Parse through the file to find which index values are null
+      */
     Lib.debug(dbgProcess, "handleOpen: Checking which index values are null:");
     if(opened_file != null) {
 	for (i = 0; i < this.file.length; i++){
@@ -505,23 +507,22 @@ private int handleOpen(int file2) {
 }
 
 private int handleRead(int a, int b, int c) {
-    OpenFile opened_file = file[a];						// file descriptor = a
+    OpenFile opened_file = file[a];							// file descriptor = a
+    if(opened_file == null) { return -1; }						// invalid open
     
-    if(file == null) { return -1; }						// invalid open
+    byte[] buff = new byte[c];								// buff length = c
+    int bytesRead;									// counter if successful
     
-    byte[] buff = new byte[c];							// buff length = c
-    int bytesRead;								// counter if successful
-    
-    bytesRead = opened_file.read(buff, 0, c);					// read in file, offset = 0
-    writeVirtualMemory(b, buff);						// write to buffer `b`
+    bytesRead = opened_file.read(buff, 0, c);						// read in file, offset = 0
+    writeVirtualMemory(b, buff);							// write to buffer `b`
     
     return bytesRead;
     
-    /*int descriptor = a;											// For this file descriptor
-    int buff = b;												// For the buffer
-    int count = c;												// For the counter
+    /*int descriptor = a;								// For this file descriptor
+    int buff = b;									// For the buffer
+    int count = c;									// For the counter
     byte[] testBuff = new byte[1];
-    int readByte = 0;											// Counter for bytes read
+    int readByte = 0;									// Counter for bytes read
     int read;
 
     
@@ -706,15 +707,15 @@ private int handleExec(int file1, int argc, int argv) {
     String[] temp_fd = new String[argc];
     
     for(int i = 0; i < argc; i++) {
-	byte[] argCheck = new byte[4];					// size of each 4-byte address
-	readVirtualMemory(argv + i*4, argCheck);
-	temp_fd[i] = readVirtualMemoryString((Lib.bytesToInt(argCheck, 0)), MAX_BYTES);
+	byte[] arg_temp = new byte[4];					// size of each 4-byte address
+	readVirtualMemory(argv + i*4, arg_temp);
+	temp_fd[i] = readVirtualMemoryString((Lib.bytesToInt(arg_temp, 0)), MAX_BYTES);
     }
     ///---------------------------------------------------------------------------------------------------------------
     //uses another process derived from userprocess 
     UserProcess childProcess = UserProcess.newUserProcess();
     
-    this.childPT.add(childProcess);
+    childPT.add(childProcess);
     String p_id = readVirtualMemoryString(file1, MAX_BYTES);		// read in process name
     boolean runExecute = childProcess.execute(p_id, temp_fd);
 
@@ -753,12 +754,13 @@ private int handleClose(int fileDescriptor) {
 	return -1;														// Error if greater than 15
 */
     OpenFile closingFile;
-    closingFile = this.file[fileDescriptor];						// File to be closed
+    closingFile = file[fileDescriptor];						// File to be closed
 
     Lib.debug(dbgProcess, "handleClose: Checking if the file being closed is valid");
     if(closingFile != null) {						// If there's no file or data stored, return an error
 	file[fileDescriptor].close();					// atomically close file
     	file[fileDescriptor] = null;
+    	
     	return fileDescriptor;
     }
     Lib.debug(dbgProcess, "handleClose: Checking to see if file is closed yet:");
@@ -811,7 +813,6 @@ private int handleExit(int status){
 	Machine.halt();
     }
     KThread.finish();
-    
     return exitFlag;
 }
 
@@ -861,7 +862,7 @@ private int handleJoin(int child_pid) {
 	temp = it.next();
 	if(temp.process_id == process_id) {
 	    temp.joined.P();					// acquire lock before putting to sleep
-	    return temp.exitFlag;					// found a child process, done
+	    return temp.exitFlag;				// found a child process, done
 	}
     }
     return -1;
